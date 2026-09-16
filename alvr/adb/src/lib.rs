@@ -16,13 +16,13 @@ use std::{fs,io};
 use sha1::{Sha1, Digest};
 
 pub enum WiredConnectionStatus {
-    Ready,
+    Ready(String),
     NotReady(String),
 }
 
 pub struct WiredConnection {
     adb_path: String,    
-    autolaunch_time: Option<Instant>
+    autolaunch_time: Option<Instant>,
 }
 
 impl WiredConnection {
@@ -176,7 +176,7 @@ impl WiredConnection {
                 }
             }
 
-            Ok(WiredConnectionStatus::Ready)
+            Ok(WiredConnectionStatus::Ready(device_serial))
         }
     }
 }

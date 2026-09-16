@@ -410,8 +410,8 @@ pub fn kill_server(adb_path: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn suspend_hmd(adb_path: &str) -> Result<()> {
-    get_command( adb_path, &["shell", "input keyevent KEYCODE_SLEEP"])
+pub fn suspend_hmd(adb_path: &str, device_serial: &str) -> Result<()> {
+    get_command( adb_path, &["-s", device_serial, "shell", "input keyevent KEYCODE_SLEEP"])
     .output()
     .context(
         "Failed to suspend hmd"
@@ -420,8 +420,8 @@ pub fn suspend_hmd(adb_path: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn wakeup_hmd(adb_path: &str) -> Result<()> {
-    get_command( adb_path, &["shell", "input keyevent KEYCODE_WAKEUP"])
+pub fn wakeup_hmd(adb_path: &str, device_serial: &str) -> Result<()> {
+    get_command( adb_path, &["-s", device_serial,"shell", "input keyevent KEYCODE_WAKEUP"])
     .output()
     .context(
         "Failed to wake hmd up"

@@ -246,12 +246,13 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
         }
     };
 
-    let mut wired_connection = None;
+    let mut wired_connection: Option<WiredConnection> = None;        
 
     while *lifecycle_state.read() != LifecycleState::ShuttingDown {
         dbg_connection!("handshake_loop: Try connect to wired device");
 
         let mut wired_client_ips = HashMap::new();
+        let mut device_serial: Option<String> = None;
         if SESSION_MANAGER
             .read()
             .client_list()
@@ -318,14 +319,19 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
             };
 
             #[cfg_attr(not(debug_assertions), expect(unused_variables))]
-            if let WiredConnectionStatus::NotReady(s) = status {
-                info!("handshake_loop: Wired connection not ready: {s}");
-                thread::sleep(RETRY_CONNECT_MIN_INTERVAL);
-                continue;
-            }
 
-            let client_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
-            wired_client_ips.insert(client_ip, WIRED_CLIENT_HOSTNAME.to_owned());
+            match status {
+                WiredConnectionStatus::NotReady(s) => {
+                    info!("handshake_loop: Wired connection not ready: {s}");
+                    thread::sleep(RETRY_CONNECT_MIN_INTERVAL);
+                    continue;
+                },
+                WiredConnectionStatus::Ready(s) => {
+                    let client_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+                    wired_client_ips.insert(client_ip, WIRED_CLIENT_HOSTNAME.to_owned());
+                    device_serial = Some(s);
+                }
+            }
         }
 
         if !wired_client_ips.is_empty()
@@ -333,6 +339,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
                 Arc::clone(&ctx),
                 Arc::clone(&lifecycle_state),
                 wired_client_ips,
+                &device_serial,
             )
             .is_ok()
         {
@@ -366,6 +373,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
                 Arc::clone(&ctx),
                 Arc::clone(&lifecycle_state),
                 available_manual_client_ips,
+                &device_serial,
             )
             .is_ok()
         {
@@ -431,6 +439,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
                         Arc::clone(&ctx),
                         Arc::clone(&lifecycle_state),
                         [(client_ip, client_hostname.clone())].into_iter().collect(),
+                        &device_serial,
                     )
                 {
                     error!("Could not initiate connection for {client_hostname}: {e}");
@@ -457,6 +466,7 @@ fn try_connect(
     ctx: Arc<ConnectionContext>,
     lifecycle_state: Arc<RwLock<LifecycleState>>,
     mut client_ips: HashMap<IpAddr, String>,
+    device_serial: &Option<String>,
 ) -> ConResult {
     dbg_connection!("try_connect: Finding client and creating control socket");
 
@@ -472,7 +482,8 @@ fn try_connect(
     dbg_connection!("try_connect: Pushing new client connection thread");
 
     ctx.connection_threads.lock().push(thread::spawn({
-        let ctx = Arc::clone(&ctx);
+        let ctx: Arc<ConnectionContext> = Arc::clone(&ctx);
+        let device_serial = device_serial.clone();
         move || {
             if let Err(e) = connection_pipeline(
                 Arc::clone(&ctx),
@@ -480,6 +491,7 @@ fn try_connect(
                 proto_socket,
                 client_hostname.clone(),
                 client_ip,
+                device_serial,
             ) {
                 error!("Handshake error for {client_hostname}: {e}");
             }
@@ -508,6 +520,7 @@ fn connection_pipeline(
     mut proto_socket: ProtoControlSocket,
     client_hostname: String,
     client_ip: IpAddr,
+    device_serial: Option<String>
 ) -> ConResult {
     dbg_connection!("connection_pipeline: Begin");
 
@@ -1302,19 +1315,20 @@ fn connection_pipeline(
                     }
                     ClientControlPacket::UserPresence(is_user_present) => {
                         info!("Received user presence: {is_user_present}");
-                        if let Some(adb_path) = &adb_path && !is_user_present {
-                            info!("Suspending HMD");
+                        if let Some(adb_path) = &adb_path && let Some(ref device_serial) = device_serial {
                             if is_user_present {
-                                match alvr_adb::commands::wakeup_hmd(adb_path) {
+                                info!("Waking up HMD");
+                                match alvr_adb::commands::wakeup_hmd(adb_path, &device_serial) {
                                     Ok(_) => {
                                         info!("HMD woken up");
                                     },
                                     Err(err) => {
-                                        error!("Failed to swake HMD up: {err} ");
+                                        error!("Failed to wake HMD up: {err} ");
                                     }
                                 }
                             } else {
-                                match alvr_adb::commands::suspend_hmd(adb_path) {
+                                info!("Suspending HMD");
+                                match alvr_adb::commands::suspend_hmd(adb_path, &device_serial) {
                                     Ok(_) => {
                                         info!("HMD suspended");
                                     },
