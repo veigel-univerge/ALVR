@@ -15,8 +15,14 @@ use std::{fs,io};
 
 use sha1::{Sha1, Digest};
 
+#[derive(Clone)]
+pub struct WiredConnectionInfo {
+    pub device_serial: String,
+    pub process_name: String,
+}
+
 pub enum WiredConnectionStatus {
-    Ready(String),
+    Ready(WiredConnectionInfo),
     NotReady(String),
 }
 
@@ -161,7 +167,23 @@ impl WiredConnection {
                     "ALVR client is not running".to_owned(),
                 ))
             }
-        } else if !commands::is_activity_resumed(&self.adb_path, &device_serial, &process_name)? {
+        } else if self.autolaunch_time.is_none() && !commands::is_activity_resumed(&self.adb_path, &device_serial, &process_name)? {
+
+            if commands::is_passthrough_eanbled(&self.adb_path, &device_serial)?==Some(true) {
+                commands::toggle_passthrough(&self.adb_path, &device_serial)?;
+            // } else if commands::is_hmd_mounted(&self.adb_path, &device_serial)?==Some(true) {
+
+            //      match commands::restore_focus(&self.adb_path, &device_serial, &process_name) {
+            //          Ok(()) => {
+            //              return Ok(WiredConnectionStatus::NotReady(
+            //                  "ALVR client is paused, bringing back to focus".to_owned(),
+            //              ))
+            //          }
+            //          Err(_) => {
+            //              //Ok(WiredConnectionStatus::NotReady("ALVR client is paused, cannot restore state".to_owned()))
+            //          }
+            //      }
+            }
             Ok(WiredConnectionStatus::NotReady(
                 "ALVR client is paused".to_owned(),
             ))
@@ -176,7 +198,7 @@ impl WiredConnection {
                 }
             }
 
-            Ok(WiredConnectionStatus::Ready(device_serial))
+            Ok(WiredConnectionStatus::Ready(WiredConnectionInfo {device_serial, process_name }))
         }
     }
 }

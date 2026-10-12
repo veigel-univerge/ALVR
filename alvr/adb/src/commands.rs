@@ -429,3 +429,112 @@ pub fn wakeup_hmd(adb_path: &str, device_serial: &str) -> Result<()> {
 
     Ok(())
 }
+
+pub fn is_focus_lost(adb_path: &str, device_serial: &str, application_id: &str) -> Result<bool> {
+
+    let output = get_command( 
+        adb_path,
+        &[
+            "-s",
+            device_serial,
+            "shell",
+            "dumpsys window | grep 'mCurrentFocus=Window'"
+        ],
+    ).output()
+        .context(format!(
+            "Failed to determine focus state of device {device_serial:?}"
+        ))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(!text.contains(application_id))
+}
+
+pub fn restore_focus(adb_path: &str, device_serial: &str, application_id: &str) -> Result<()> {
+
+    let activity = format!("{application_id}/android.app.NativeActivity");
+
+    get_command( 
+        adb_path, 
+        &[
+            "-s", 
+            device_serial,
+            "shell", 
+            "am start -n ",
+            &activity,
+            "-f 0x12020000"
+        ]
+    ).output().context(
+        "Failed to restore focus"
+    )?;
+
+    Ok(())
+}
+
+pub fn is_hmd_mounted(adb_path: &str, device_serial: &str) -> Result<Option<bool>> {
+    let output = get_command( 
+        adb_path,
+        &[
+            "-s",
+            device_serial,
+            "shell",
+            "getprop sys.hmt.mounted"
+        ],
+    ).output()
+        .context(format!(
+            "Failed to determine focus state of device {device_serial:?}"
+        ))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    if text.trim() == "1" {
+        Ok(Some(true))
+    } else if text.trim() == "0" {
+        Ok(Some(false))
+    }
+    else {
+        Ok(None)
+    } 
+}
+
+pub fn is_passthrough_eanbled(adb_path: &str, device_serial: &str) -> Result<Option<bool>> {
+
+    let output = get_command( 
+        adb_path,
+        &[
+            "-s",
+            device_serial,
+            "shell",
+            "dumpsys SurfaceFlinger | grep -i ovrState:"
+        ],
+    ).output()
+        .context(format!(
+            "Failed to determine focus state of device {device_serial:?}"
+        ))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let result = if text.contains("passthrough: 0") {
+        Some(false)
+    } else if text.contains("passthrough: 1") {
+        Some(true)
+    } else {
+        None
+    };
+
+    Ok(result)
+}
+
+pub fn toggle_passthrough(adb_path: &str, device_serial: &str) -> Result<()> {
+    get_command( 
+        adb_path, 
+        &[
+            "-s", 
+            device_serial,
+            "shell", 
+            "am broadcast -a com.oculus.vrshell.intent.action.UPDATE_FULL_PASSTHROUGH -n com.oculus.vrshell/.ShellControlBroadcastReceiver --es toggle_point QuickActionMenu",
+        ]
+    ).output().context(
+        "Failed to toggle passthrough"
+    )?;
+    Ok(())
+}

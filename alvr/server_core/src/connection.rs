@@ -7,7 +7,7 @@ use crate::{
     statistics::StatisticsManager,
     tracking::{self, TrackingManager},
 };
-use alvr_adb::{WiredConnection, WiredConnectionStatus};
+use alvr_adb::{WiredConnection, WiredConnectionStatus, WiredConnectionInfo};
 use alvr_common::{
     AnyhowToCon, BUTTON_INFO, CONTROLLER_PROFILE_INFO, ConResult, ConnectionError, ConnectionState,
     LifecycleState, QUEST_CONTROLLER_PROFILE_PATH, con_bail, dbg_connection, debug, error,
@@ -252,7 +252,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
         dbg_connection!("handshake_loop: Try connect to wired device");
 
         let mut wired_client_ips = HashMap::new();
-        let mut device_serial: Option<String> = None;
+        let mut wired_connection_info: Option<WiredConnectionInfo> = None;
         if SESSION_MANAGER
             .read()
             .client_list()
@@ -329,7 +329,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
                 WiredConnectionStatus::Ready(s) => {
                     let client_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
                     wired_client_ips.insert(client_ip, WIRED_CLIENT_HOSTNAME.to_owned());
-                    device_serial = Some(s);
+                    wired_connection_info = Some(s);
                 }
             }
         }
@@ -339,7 +339,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
                 Arc::clone(&ctx),
                 Arc::clone(&lifecycle_state),
                 wired_client_ips,
-                &device_serial,
+                &wired_connection_info,
             )
             .is_ok()
         {
@@ -373,7 +373,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
                 Arc::clone(&ctx),
                 Arc::clone(&lifecycle_state),
                 available_manual_client_ips,
-                &device_serial,
+                &wired_connection_info,
             )
             .is_ok()
         {
@@ -439,7 +439,7 @@ pub fn handshake_loop(ctx: Arc<ConnectionContext>, lifecycle_state: Arc<RwLock<L
                         Arc::clone(&ctx),
                         Arc::clone(&lifecycle_state),
                         [(client_ip, client_hostname.clone())].into_iter().collect(),
-                        &device_serial,
+                        &wired_connection_info,
                     )
                 {
                     error!("Could not initiate connection for {client_hostname}: {e}");
@@ -466,7 +466,7 @@ fn try_connect(
     ctx: Arc<ConnectionContext>,
     lifecycle_state: Arc<RwLock<LifecycleState>>,
     mut client_ips: HashMap<IpAddr, String>,
-    device_serial: &Option<String>,
+    wired_connection_info: &Option<WiredConnectionInfo>,
 ) -> ConResult {
     dbg_connection!("try_connect: Finding client and creating control socket");
 
@@ -483,7 +483,7 @@ fn try_connect(
 
     ctx.connection_threads.lock().push(thread::spawn({
         let ctx: Arc<ConnectionContext> = Arc::clone(&ctx);
-        let device_serial = device_serial.clone();
+        let wired_connection_info = wired_connection_info.clone();
         move || {
             if let Err(e) = connection_pipeline(
                 Arc::clone(&ctx),
@@ -491,7 +491,7 @@ fn try_connect(
                 proto_socket,
                 client_hostname.clone(),
                 client_ip,
-                device_serial,
+                wired_connection_info,
             ) {
                 error!("Handshake error for {client_hostname}: {e}");
             }
@@ -520,7 +520,7 @@ fn connection_pipeline(
     mut proto_socket: ProtoControlSocket,
     client_hostname: String,
     client_ip: IpAddr,
-    device_serial: Option<String>
+    wired_connection_info: Option<WiredConnectionInfo>
 ) -> ConResult {
     dbg_connection!("connection_pipeline: Begin");
 
@@ -1144,6 +1144,7 @@ fn connection_pipeline(
         move || {
             let mut disconnection_deadline = Instant::now() + KEEPALIVE_TIMEOUT;
             let adb_path = alvr_adb::commands::get_adb_path(FILESYSTEM_LAYOUT.get().unwrap());
+            let mut focus_restored_deadline = None;
             while is_streaming(&client_hostname) {
                 let packet = match control_receiver.recv(STREAMING_RECV_TIMEOUT) {
                     Ok(packet) => packet,
@@ -1159,7 +1160,7 @@ fn connection_pipeline(
                         info!("Client disconnected. Cause: {e}");
                         break;
                     }
-                };
+                };                
 
                 match packet {
                     ClientControlPacket::PlayspaceSync(packet) => {
@@ -1315,10 +1316,10 @@ fn connection_pipeline(
                     }
                     ClientControlPacket::UserPresence(is_user_present) => {
                         info!("Received user presence: {is_user_present}");
-                        if let Some(adb_path) = &adb_path && let Some(ref device_serial) = device_serial {
+                        if let Some(adb_path) = &adb_path && let Some(ref wired_connection_info) = wired_connection_info {
                             if is_user_present {
                                 info!("Waking up HMD");
-                                match alvr_adb::commands::wakeup_hmd(adb_path, &device_serial) {
+                                match alvr_adb::commands::wakeup_hmd(adb_path, &wired_connection_info.device_serial) {
                                     Ok(_) => {
                                         info!("HMD woken up");
                                     },
@@ -1328,7 +1329,7 @@ fn connection_pipeline(
                                 }
                             } else {
                                 info!("Suspending HMD");
-                                match alvr_adb::commands::suspend_hmd(adb_path, &device_serial) {
+                                match alvr_adb::commands::suspend_hmd(adb_path, &wired_connection_info.device_serial) {
                                     Ok(_) => {
                                         info!("HMD suspended");
                                     },
@@ -1341,6 +1342,41 @@ fn connection_pipeline(
                         ctx.events_sender.send(ServerCoreEvent::UserPresence(is_user_present)).ok();
                     }
                     _ => (),
+                }
+
+                if let Some(adb_path) = &adb_path && let Some(ref wired_connection_info) = wired_connection_info {
+                    match alvr_adb::commands::is_focus_lost(adb_path, &wired_connection_info.device_serial, &wired_connection_info.process_name) {
+                        Ok(true) => {
+                            match focus_restored_deadline {
+                                Some(focus_restored_deadline_time) => {
+                                    if focus_restored_deadline_time < Instant::now() {
+                                        match alvr_adb::commands::is_passthrough_eanbled(adb_path, &wired_connection_info.device_serial) {
+                                            Ok(Some(true)) => {
+                                                debug!("focus lost because because of passthrough");
+                                            }
+                                            _ => {
+                                                match alvr_adb::commands::restore_focus(adb_path, &wired_connection_info.device_serial, &wired_connection_info.process_name) {
+                                                    Ok(_) => {
+                                                        info!("Sent command to restore focus");
+                                                    },
+                                                    Err(err) => {
+                                                        error!("Failed to restore focus: {err}");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        focus_restored_deadline = Some(Instant::now() + Duration::from_millis(1000));
+                                    }
+                                }
+                                None => {
+                                    focus_restored_deadline = Some(Instant::now() + Duration::from_millis(1000));
+                                }
+                            }
+                        }
+                        _ => {
+                            focus_restored_deadline = None;
+                        }
+                    }
                 }
 
                 disconnection_deadline = Instant::now() + KEEPALIVE_TIMEOUT;

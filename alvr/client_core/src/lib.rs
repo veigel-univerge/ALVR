@@ -273,10 +273,11 @@ impl ClientCoreContext {
     }
 
     pub fn report_fatal_decoder_error(&self, error: &str) {
-        error!("Fatal decoder error, restarting connection: {error}");
+        error!("Fatal decoder error, terminating: {error}");
 
-        // The connection loop observes changes on this value
-        *self.connection_context.state.write() = ConnectionState::Disconnecting;
+        // The connection loop observes changes on this value        
+        *self.connection_context.state.write() = ConnectionState::Disconnecting;        
+        std::process::exit(0);
     }
 
     pub fn report_compositor_start(&self, timestamp: Duration) -> [ViewParams; 2] {

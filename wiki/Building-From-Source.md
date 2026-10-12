@@ -201,6 +201,16 @@ For Windows, set the environment variables:
 * `ANDROID_NDK_HOME`:
   * Example: `%LOCALAPPDATA%\Android\Sdk\ndk\25.1.8937393`
 
+Univerge: This what's running locally.
+```
+winget install -e --id Google.AndroidCLI
+android sdk install platforms/android-32
+setx ANDROID_HOME "%LOCALAPPDATA%\Android\Sdk"
+android sdk install ndk/29.0.14206865
+setx ANDROID_NDK_HOME "%LOCALAPPDATA%\Android\Sdk\ndk\29.0.14206865"
+android sdk install build-tools/32.0.0
+```  
+
 For Linux, the correct directories for the environment variables can greatly differ depending on the type of install. See the wiki page of your distro for more information:
 
 * Gentoo:
