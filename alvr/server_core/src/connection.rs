@@ -41,6 +41,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(not(target_family = "windows"))]
+use std::os::windows::process::CommandExt;
+
 const RETRY_CONNECT_MIN_INTERVAL: Duration = Duration::from_secs(1);
 const HANDSHAKE_ACTION_TIMEOUT: Duration = Duration::from_secs(2);
 pub const STREAMING_RECV_TIMEOUT: Duration = Duration::from_millis(500);
@@ -1431,9 +1434,14 @@ fn connection_pipeline(
                 "Running on connect script (connect): {}",
                 on_connect_script.display()
             );
-            if let Err(e) = Command::new(&on_connect_script)
-                .env("ACTION", "connect")
-                .spawn()
+
+            let mut command = Command::new(&on_connect_script);
+            command.env("ACTION", "connect");
+
+            #[cfg(not(target_family = "windows"))]
+            let command = command.creation_flags(0x08000000); //const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+            if let Err(e) = command.spawn()
             {
                 warn!("Failed to run connect script: {e}");
             }
