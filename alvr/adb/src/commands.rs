@@ -180,7 +180,7 @@ pub fn start_application(adb_path: &str, device_serial: &str, application_id: &s
             "-s",
             device_serial,
             "shell",
-            "taskset 0000000F am broadcast -a com.oculus.vrpowermanager.prox_close;sleep 1;", // disabled proximity sensor temporarily
+            "taskset 0000000F am broadcast -a com.oculus.vrpowermanager.prox_close;sleep 3;", // disabled proximity sensor temporarily
             "monkey",
             "-p",
             application_id,
