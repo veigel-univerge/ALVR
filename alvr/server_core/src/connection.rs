@@ -41,7 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(not(target_family = "windows"))]
+
 use std::os::windows::process::CommandExt;
 
 const RETRY_CONNECT_MIN_INTERVAL: Duration = Duration::from_secs(1);
@@ -1438,8 +1438,7 @@ fn connection_pipeline(
             let mut command = Command::new(&on_connect_script);
             command.env("ACTION", "connect");
 
-            #[cfg(not(target_family = "windows"))]
-            let command = command.creation_flags(0x08000000); //const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(0x08000000); //const CREATE_NO_WINDOW: u32 = 0x08000000;
 
             if let Err(e) = command.spawn()
             {
